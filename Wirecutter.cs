@@ -108,6 +108,39 @@ namespace BVTC.RhinoTools
         public int ToleranceDecimals { get; set; }
 
         /// <summary>
+        /// Generate a list of curves that show the toolpath movement.
+        /// </summary>
+        /// <returns></returns>
+        public Curve[] CutCurves(bool onOrigin)
+        {
+            List<Curve> curves = new List<Curve>();
+            foreach (DataRow row in this.GCode.Rows)
+            {
+                double x = (double)row["X"];
+                double y = (double)row["Y"];
+                double z = (double)row["Z"];
+                double angle = (double)row["A"];
+
+                Transform xform = Transform.Rotation(RhinoMath.ToRadians(angle), this.CutPlane.Normal, new Point3d(x, y, z));
+                Point3d pt0 = new Point3d(x, y, z) + (this.CutPlane.XAxis * 25);
+                pt0.Transform(xform);
+
+                Point3d pt1 = new Point3d(x, y, z) - (this.CutPlane.XAxis * 25);
+                pt0.Transform(xform);
+
+                Curve crv = new Line(pt0, pt1).ToNurbsCurve();
+                if (!onOrigin && this.Xform.TryGetInverse(out xform))
+                {
+                    crv.Transform(xform);
+                }
+
+                curves.Add(crv);
+            }
+
+            return curves.ToArray();
+        }
+
+        /// <summary>
         /// Method to combine parameters of the toolpath class to write a simple text file containing machine instructions.
         /// </summary>
         /// <param name="path">string - the filepath where the gcode will be output.</param>
@@ -173,31 +206,23 @@ namespace BVTC.RhinoTools
                         {
                             var plane = new Plane(pts[0], this.CutPlane.Normal);
                             var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[1], plane, this.Tolerance);
+                            if (intersects == null)
+                            {
+                                pts[1] = this.CutPlane.ClosestPoint(pts[1]);
+                            }
 
-                            if (intersects[0].IsPoint)
-                            {
-                                pts[1] = intersects[0].PointA;
-                                segments[0] += 1;
-                            }
-                            else
-                            {
-                                throw new NotImplementedException("I have not programmed a method to handle overlapping curves.  Sorry.");
-                            }
+                            segments[0] += 1;
                         }
                         else
                         {
                             var plane = new Plane(pts[1], this.CutPlane.Normal);
                             var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[0], plane, this.Tolerance);
+                            if (intersects == null)
+                            {
+                                pts[1] = this.CutPlane.ClosestPoint(pts[1]);
+                            }
 
-                            if (intersects[0].IsPoint)
-                            {
-                                pts[0] = intersects[0].PointA;
-                                segments[1] += 1;
-                            }
-                            else
-                            {
-                                throw new NotImplementedException("I have not programmed a method to handle overlapping curves.  Sorry.");
-                            }
+                            segments[1] += 1;
                         }
 
                         // assign new U values //
@@ -266,13 +291,13 @@ namespace BVTC.RhinoTools
             Vector3d horizontal = this.CutPlane.XAxis;
             Vector3d vertical = this.CutPlane.YAxis;
 
-            var hAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, horizontal));
-            var vAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, vertical));
-
-            if (!this.CutPlane.Normal.IsPerpendicularTo(vector, this.Tolerance))
+            if (!this.CutPlane.Normal.IsPerpendicularTo(vector, this.Tolerance * 2 * Math.PI))
             {
                 throw new Exception("Wire vector does not lie on the cut path");
             }
+
+            var hAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, horizontal));
+            var vAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, vertical));
 
             double angle;
             if (Math.Abs(hAngle + vAngle - 90) <= this.Tolerance)
