@@ -219,7 +219,7 @@ namespace BVTC.RhinoTools
                             var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[0], plane, this.Tolerance);
                             if (intersects == null)
                             {
-                                pts[1] = this.CutPlane.ClosestPoint(pts[1]);
+                                pts[0] = this.CutPlane.ClosestPoint(pts[0]);
                             }
 
                             segments[1] += 1;
