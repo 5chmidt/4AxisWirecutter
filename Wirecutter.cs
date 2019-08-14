@@ -219,7 +219,7 @@ namespace BVTC.RhinoTools
                             var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[0], plane, this.Tolerance);
                             if (intersects == null)
                             {
-                                pts[0] = this.CutPlane.ClosestPoint(pts[0]);
+                                pts[1] = this.CutPlane.ClosestPoint(pts[1]);
                             }
 
                             segments[1] += 1;
@@ -291,31 +291,31 @@ namespace BVTC.RhinoTools
             Vector3d horizontal = this.CutPlane.XAxis;
             Vector3d vertical = this.CutPlane.YAxis;
 
-            if (!this.CutPlane.Normal.IsPerpendicularTo(vector, this.Tolerance * 2 * Math.PI))
+            if (!this.CutPlane.Normal.IsPerpendicularTo(vector))
             {
-                throw new Exception("Wire vector does not lie on the cut path");
+                vector = (Vector3d)this.CutPlane.ClosestPoint(new Point3d(vector.X, vector.Y, vector.Z));
             }
 
             var hAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, horizontal));
             var vAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, vertical));
 
             double angle;
-            if (Math.Abs(hAngle + vAngle - 90) <= this.Tolerance)
+            if (Math.Abs(hAngle + vAngle - 90) <= this.Tolerance * 360)
             {
                 // Quadrent I //
                 angle = hAngle;
             }
-            else if (Math.Abs(hAngle - vAngle - 90) <= this.Tolerance)
+            else if (Math.Abs(hAngle - vAngle - 90) <= this.Tolerance *360)
             {
                 // Quadrend II //
                 angle = 90 + vAngle;
             }
-            else if (Math.Abs(hAngle + vAngle - 270) <= this.Tolerance)
+            else if (Math.Abs(hAngle + vAngle - 270) <= this.Tolerance * 360)
             {
                 // Quadrend III //
                 angle = 90 + vAngle;
             }
-            else if (Math.Abs(vAngle - hAngle - 90) <= this.Tolerance)
+            else if (Math.Abs(vAngle - hAngle - 90) <= this.Tolerance * 360)
             {
                 // Quadrend IV //
                 angle = 360 - hAngle;
