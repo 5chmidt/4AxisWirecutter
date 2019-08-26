@@ -26,7 +26,7 @@ namespace WirecutterGH
             get
             {
                 //Return a short string describing the purpose of this GHA library.
-                return "";
+                return "Components for creating g-code for ruled surface wire cutting.";
             }
         }
         public override Guid Id
@@ -42,7 +42,7 @@ namespace WirecutterGH
             get
             {
                 //Return a string identifying you or your company.
-                return "";
+                return "Peter Schmidt";
             }
         }
         public override string AuthorContact
@@ -50,7 +50,7 @@ namespace WirecutterGH
             get
             {
                 //Return a string representing your preferred contact details.
-                return "";
+                return "www.github.com/5chmidt";
             }
         }
     }
