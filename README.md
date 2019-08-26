@@ -3,6 +3,9 @@ C# tools for Rhino 6 to enable programming of a 4-axis ruled surface cutter.
 
 To install the plugin download the .rhi file and drag and drop onto the Rhino 6 canvas, or run to install.
 
+Grasshopper Plugin:
+	Currenly a work in progress.  More info coming soon.
+
 CHANGE LOG:
 
 8/15/19 - Changed cutting plane input to specify an origin, normal and rotational axis.  After specifying the rotation of the cut plane, parts will always be translated to the origin correctly before generating toolpaths.
