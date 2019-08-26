@@ -1,5 +1,5 @@
 ﻿// Developed by Boston Valley Terra Cotta.
-namespace BVTC.RhinoTools
+namespace WirecutterGH
 {
     using System;
     using System.Collections.Generic;
