@@ -4,8 +4,14 @@
     using System.Drawing;
     using Grasshopper.Kernel;
 
+    /// <summary>
+    /// Grasshopper plugin info.
+    /// </summary>
     public class WirecutterGHInfo : GH_AssemblyInfo
     {
+        /// <summary>
+        /// Gets the name of the plugin.
+        /// </summary>
         public override string Name
         {
             get
@@ -14,6 +20,9 @@
             }
         }
 
+        /// <summary>
+        /// Gets the icon used for the grasshopper component.
+        /// </summary>
         public override Bitmap Icon
         {
             get
@@ -23,6 +32,9 @@
             }
         }
 
+        /// <summary>
+        /// Gets the description used for the plugin.
+        /// </summary>
         public override string Description
         {
             get
@@ -32,6 +44,9 @@
             }
         }
 
+        /// <summary>
+        /// Gets the identifier for the component.
+        /// </summary>
         public override Guid Id
         {
             get
@@ -40,6 +55,9 @@
             }
         }
 
+        /// <summary>
+        /// Gets the name of the plugin author.
+        /// </summary>
         public override string AuthorName
         {
             get
@@ -49,6 +67,9 @@
             }
         }
 
+        /// <summary>
+        /// Gets the contact info for the plugin pulblisher.
+        /// </summary>
         public override string AuthorContact
         {
             get

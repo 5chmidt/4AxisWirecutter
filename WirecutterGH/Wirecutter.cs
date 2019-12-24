@@ -14,7 +14,7 @@ namespace WirecutterGH
     public class Wirecutter
     {
         /// <summary>
-        /// 
+        /// Creates and sets up defaults settings for the Rhino plugin.
         /// </summary>
         /// <param name="doc">The current Rhino Doc.</param>
         /// <param name="dt">DataTable - must contain correct column structure for toolpathing inputs.</param>
@@ -117,7 +117,7 @@ namespace WirecutterGH
         /// Generate a list of curves that show the toolpath movement.
         /// </summary>
         /// <param name="onOrigin">If true generate the toolpaths at world Origin.</param>
-        /// <returns></returns>
+        /// <returns>Curves that habe been transformed to the origin.</returns>
         public Curve[] CutCurves(bool onOrigin)
         {
             List<Curve> curves = new List<Curve>();

@@ -11,6 +11,9 @@ namespace WirecutterGH
     using Rhino.Geometry;
     using GH = Grasshopper;
 
+    /// <summary>
+    /// Wirecutter grasshopper component.
+    /// </summary>
     public class WirecutterGHComponent : GH_Component
     {
         /// <summary>
