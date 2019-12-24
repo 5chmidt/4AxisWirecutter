@@ -14,9 +14,11 @@ namespace WirecutterGH
     public class Wirecutter
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="Wirecutter"/> class.
+        /// 
         /// </summary>
+        /// <param name="doc">The current Rhino Doc.</param>
         /// <param name="dt">DataTable - must contain correct column structure for toolpathing inputs.</param>
+        /// <param name="plane">The base plane for the toolpath coordinate system.</param>
         /// <param name="offset">double - the retract offset specified by the programmer.</param>
         public Wirecutter(RhinoDoc doc, DataTable dt, Rhino.Geometry.Plane plane, double offset)
         {
@@ -26,7 +28,7 @@ namespace WirecutterGH
             this.NCFooter = "M30";
 
             this.CurrentLocation = new double[] { -offset, 0, 0, 0 };
-            this.AxisPrefixes = new string[] { "X ", "Y ", "Z ", "Q1="};
+            this.AxisPrefixes = new string[] { "X ", "Y ", "Z ", "Q1=" };
             this.FeedPrefix = "F";
             this.CutPrefix = "G01   ";
             this.CuttingSpeed = 200;
@@ -45,13 +47,15 @@ namespace WirecutterGH
             this.GCode.Columns.Add("A", typeof(double));
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Wirecutter"/> class.
+        /// </summary>
         public Wirecutter()
         {
             this.CutPlane = Rhino.Geometry.Plane.WorldYZ;
             this.Tolerance = 0.001;
             this.ToleranceDecimals = 3;
             this.CurrentLocation = new double[] { 0, 0, 0, 1 };
-
         }
 
         /// <summary>
@@ -79,6 +83,16 @@ namespace WirecutterGH
         /// </summary>
         public string FilePath { get; set; }
 
+        /// <summary>
+        /// Gets or sets the minumum accurate measurement default: 0.001".
+        /// </summary>
+        public double Tolerance { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of decimal places to calculate tolerance.
+        /// </summary>
+        public int ToleranceDecimals { get; set; }
+
         private string[] AxisPrefixes { get; set; }
 
         private double[] CurrentLocation { get; set; }
@@ -90,22 +104,14 @@ namespace WirecutterGH
         private string RapidPrefix { get; set; }
 
         private string CutPrefix { get; set; }
-        
+
         private DataTable GCode { get; set; }
 
         private string FeedPrefix { get; set; }
 
         private DataTable Parameters { get; set; }
 
-        /// <summary>
-        /// Gets or sets the minumum accurate measurement default: 0.001".
-        /// </summary>
-        public double Tolerance { get; set; }
-
-        /// <summary>
-        /// Gets or sets the number of decimal places to calculate tolerance.
-        /// </summary>
-        public int ToleranceDecimals { get; set; }
+        private Transform Xform { get; set; }
 
         /// <summary>
         /// Generate a list of curves that show the toolpath movement.
@@ -340,7 +346,7 @@ namespace WirecutterGH
                 // Quadrent I //
                 angle = hAngle;
             }
-            else if (Math.Abs(hAngle - vAngle - 90) <= this.Tolerance *360)
+            else if (Math.Abs(hAngle - vAngle - 90) <= this.Tolerance * 360)
             {
                 // Quadrend II //
                 angle = 90 + vAngle;
@@ -372,8 +378,6 @@ namespace WirecutterGH
             return Math.Round(this.CurrentLocation[3] + move, this.ToleranceDecimals);
         }
 
-        private Transform Xform { get; set; }
-
         private DataRow CalculatePostion(Point3d pt0, Point3d pt1)
         {
             DataRow position = this.GCode.NewRow();
@@ -393,12 +397,13 @@ namespace WirecutterGH
         private bool ValidateInputTable(bool throwError = true)
         {
             // verify correct DataTable rows //
-            string[] columns = new string[] {
-                    "Type",
-                    "Curve0",
-                    "Curve1",
-                    "Extend",
-                };
+            string[] columns = new string[]
+            {
+                "Type",
+                "Curve0",
+                "Curve1",
+                "Extend",
+            };
             foreach (string col in columns)
             {
                 if (!this.Parameters.Columns.Contains(col) && throwError)
@@ -410,6 +415,7 @@ namespace WirecutterGH
                     return false;
                 }
             }
+
             return true;
         }
 
