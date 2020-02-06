@@ -9,8 +9,7 @@ Where the start of the first curve is not the end of the second curve, the g-cod
 This is causing the machine to begin jogging to the next toolpath prior to finishing the first cut in its entirity.
 Example File: /BugSubmissions/Multi-Line.3dm
 
-CHANGE LOG:
-
+<h2>CHANGE LOG</h2>
 8/15/19 - Changed cutting plane input to specify an origin, normal and rotational axis.  After specifying the rotation of the cut plane, parts will always be translated to the origin correctly before generating toolpaths.
 
 8/15/19 - Changed to default toolpath tolerance to be 0.01" from 0.001" to reduce toolpath geneation time and file size.  Increasing the tolerance will also be more forgiving of modeling that is not a perfectly ruled surface.
