@@ -8,7 +8,8 @@ If issues are found in testing please submit them via a github issue and/or uplo
 
 CHANGE LOG:
 
-<h4>2/8/20 - RESOLVED</h4> When creating multi-line toolpaths.
+<h4>2/8/20 - RESOLVED</h4> 
+When creating multi-line toolpaths.
 Where the start of the first curve is not the end of the second curve, the g-code is missing the last line of the first curve.
 This is causing the machine to begin jogging to the next toolpath prior to finishing the first cut in its entirity.
 
