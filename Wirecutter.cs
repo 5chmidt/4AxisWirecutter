@@ -7,6 +7,7 @@ namespace BVTC.RhinoTools
     using System.IO;
     using Rhino;
     using Rhino.Geometry;
+    using System.Linq;
 
     /// <summary>
     /// Class used to generate .nc code for 4-axis wirecutting.
@@ -20,54 +21,24 @@ namespace BVTC.RhinoTools
         /// <param name="offset">double - the retract offset specified by the programmer.</param>
         public Wirecutter(RhinoDoc doc, DataTable dt, Rhino.Geometry.Plane plane, double offset)
         {
+            this.DefaultSetup();
             this.Doc = doc;
             this.Parameters = dt;
-            this.NCHeader = "G54";
-            this.NCFooter = "M30";
-
-            this.CurrentLocation = new double[] { -offset, 0, 0, 0 };
-            this.AxisPrefixes = new string[] { "X ", "Y ", "Z ", "Q1="};
-            this.FeedPrefix = "F";
-            this.CutPrefix = "G01   ";
-            this.CuttingSpeed = 200;
-            this.RapidPrefix = "G00   ";
-            this.CutPlane = Rhino.Geometry.Plane.WorldYZ;
             this.Xform = Rhino.Geometry.Transform.PlaneToPlane(plane, this.CutPlane);
-            this.Tolerance = 0.01;
-            this.ToleranceDecimals = 3;
-
-            // build toolpath datatable //
-            this.GCode = new DataTable("GCode");
-            this.GCode.Columns.Add("Type", typeof(string));
-            this.GCode.Columns.Add("X", typeof(double));
-            this.GCode.Columns.Add("Y", typeof(double));
-            this.GCode.Columns.Add("Z", typeof(double));
-            this.GCode.Columns.Add("A", typeof(double));
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Wirecutter"/> class.
+        /// </summary>
         public Wirecutter()
         {
-            this.CutPlane = Rhino.Geometry.Plane.WorldYZ;
-            this.Tolerance = 0.001;
-            this.ToleranceDecimals = 3;
-            this.CurrentLocation = new double[] { 0, 0, 0, 1 };
-
+            this.DefaultSetup();
         }
 
         /// <summary>
         /// Gets or sets the speed for cutting toolpaths (inches per minute).
         /// </summary>
         public int CuttingSpeed { get; set; }
-
-        /// <summary>
-        /// Gets or sets the machine code header that will be applied before all movement instructions.
-        /// </summary>
-        public string NCHeader { get; set; }
-
-        /// <summary>
-        /// Gets or sets the machine code footer that will be applied following all movement instructions.
-        /// </summary>
-        public string NCFooter { get; set; }
 
         /// <summary>
         /// Gets or sets a message if there is an error generating a toolpath, to be viewed by the end user.
@@ -78,6 +49,34 @@ namespace BVTC.RhinoTools
         /// Gets or sets the location of the NC file that is in progress.
         /// </summary>
         public string FilePath { get; set; }
+
+        /// <summary>
+        /// Gets the currently loaded NC code as a DataTable.
+        /// </summary>
+        public DataTable NCTable
+        {
+            get { return this.GCode; }
+        }
+
+        /// <summary>
+        /// Gets or sets the machine code footer that will be applied following all movement instructions.
+        /// </summary>
+        public string NCFooter { get; set; }
+
+        /// <summary>
+        /// Gets or sets the machine code header that will be applied before all movement instructions.
+        /// </summary>
+        public string NCHeader { get; set; }
+
+        /// <summary>
+        /// Gets or sets the minumum accurate measurement default: 0.001".
+        /// </summary>
+        public double Tolerance { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of decimal places to calculate tolerance.
+        /// </summary>
+        public int ToleranceDecimals { get; set; }
 
         private string[] AxisPrefixes { get; set; }
 
@@ -90,31 +89,23 @@ namespace BVTC.RhinoTools
         private string RapidPrefix { get; set; }
 
         private string CutPrefix { get; set; }
-        
+
         private DataTable GCode { get; set; }
 
         private string FeedPrefix { get; set; }
 
         private DataTable Parameters { get; set; }
 
-        /// <summary>
-        /// Gets or sets the minumum accurate measurement default: 0.001".
-        /// </summary>
-        public double Tolerance { get; set; }
-
-        /// <summary>
-        /// Gets or sets the number of decimal places to calculate tolerance.
-        /// </summary>
-        public int ToleranceDecimals { get; set; }
+        private Transform Xform { get; set; }
 
         /// <summary>
         /// Generate a list of curves that show the toolpath movement.
         /// </summary>
         /// <param name="onOrigin">If true generate the toolpaths at world Origin.</param>
         /// <returns></returns>
-        public Curve[] CutCurves(bool onOrigin)
+        public Line[] ToolpathToCurves(bool onOrigin, double lineLength = 6)
         {
-            List<Curve> curves = new List<Curve>();
+            List<Line> lines = new List<Line>();
             foreach (DataRow row in this.GCode.Rows)
             {
                 double x = (double)row["X"];
@@ -123,22 +114,142 @@ namespace BVTC.RhinoTools
                 double angle = (double)row["A"];
 
                 Transform xform = Transform.Rotation(RhinoMath.ToRadians(angle), this.CutPlane.Normal, new Point3d(x, y, z));
-                Point3d pt0 = new Point3d(x, y, z) + (this.CutPlane.XAxis * 25);
+                Point3d pt0 = new Point3d(x, y, z) + (this.CutPlane.XAxis * lineLength);
+                Point3d pt1 = new Point3d(x, y, z) - (this.CutPlane.XAxis * lineLength);
                 pt0.Transform(xform);
+                pt1.Transform(xform);
 
-                Point3d pt1 = new Point3d(x, y, z) - (this.CutPlane.XAxis * 25);
-                pt0.Transform(xform);
-
-                Curve crv = new Line(pt0, pt1).ToNurbsCurve();
+                Line line = new Line(pt0, pt1);
                 if (!onOrigin && this.Xform.TryGetInverse(out xform))
                 {
-                    crv.Transform(xform);
+                    line.Transform(xform);
                 }
 
-                curves.Add(crv);
+                lines.Add(line);
             }
 
-            return curves.ToArray();
+            return lines.ToArray();
+        }
+
+        /// <summary>
+        /// Generate a preview mesh of the toolpath cuts.
+        /// </summary>
+        /// <param name="onOrigin"></param>
+        /// <returns>Mesh - Rhino geometry.</returns>
+        public Mesh[] ToolpathToMesh(bool onOrigin)
+        {
+            Line[] lines = this.ToolpathToCurves(onOrigin);
+            List<Mesh> meshes = new List<Mesh>();
+
+            for (int i = 0; i < lines.Length - 1; i++)
+            {
+                Mesh mesh = new Mesh();
+                Line first = lines[i];
+                Line second = lines[i + 1];
+
+                // check if the curves are intersection //
+                double a;
+                double b;
+                if (Rhino.Geometry.Intersect.Intersection.LineLine(first, second, out a, out b, this.Tolerance, true))
+                {
+                    // create two triangular meshes //
+                    Point3d intersect = first.PointAt(a);
+                    
+                    // add verticies //
+                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtStart);
+                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtStart);
+                    mesh.Vertices.Add(intersect);
+                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtEnd);
+                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtEnd);
+
+                    // add faces //
+                    mesh.Faces.AddFace(0, 1, 2);
+                    mesh.Faces.AddFace(3, 1, 4);
+                    mesh.Normals.ComputeNormals();
+                    mesh.Compact();
+                    meshes.Add(mesh);
+                }
+                else
+                {
+                    // add single quad mesh //
+                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtStart);
+                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtStart);
+                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtEnd);
+                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtEnd);
+                    mesh.Faces.AddFace(0, 1, 2, 3);
+                    mesh.Normals.ComputeNormals();
+                    mesh.Compact();
+                    meshes.Add(mesh);
+                }
+            }
+
+            return meshes.ToArray();
+        }
+
+        /// <summary>
+        /// Loads an .NC file into this.NCTable DataTable format.
+        /// </summary>
+        /// <param name="filePath">string - filePath of the nc code.</param>
+        /// <returns>bool - true if file was loaded return true.</returns>
+        public bool LoadGCodeFile(string filePath)
+        {
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException($"Cannot find toolpath file at: '{filePath}'");
+            }
+
+            // reset gcode settings //
+            this.DefaultSetup();
+            using (FileStream fileStream = File.OpenRead(filePath))
+            {
+                using (var streamReader = new StreamReader(fileStream))
+                {
+                    string line;
+                    while ((line = streamReader.ReadLine()) != null)
+                    {
+                        // don't add setup lines to positioning table //
+                        if (line.Contains("G54"))
+                        {
+                            continue;
+                        }
+
+                        DataRow row = this.GCode.NewRow();
+                        // Is line a cut or a jog motion //
+                        if (line.StartsWith("G00"))
+                        {
+                            row["Type"] = "Retract";
+                        }
+                        else
+                        {
+                            row["Type"] = "Cut";
+                        }
+
+                        for (int i = 0; i < this.AxisPrefixes.Length; i++)
+                        {
+                            // check each axis for a command //
+                            string axisPrefix = this.AxisPrefixes[i];
+                            int index = line.IndexOf(axisPrefix);
+                            if (index < 0)
+                            {
+                                // movement not required for this axis //
+                                row[i + 1] = this.CurrentLocation[i];
+                                continue;
+                            }
+
+                            // save the axis movements to the datatable //
+                            index += axisPrefix.Length;
+                            int advance = line.Substring(index, line.Length - index).IndexOf(' ');
+                            double position = double.Parse(line.Substring(index, advance));
+                            row[i + 1] = position;
+                            this.CurrentLocation[i] = position;
+                        }
+
+                        this.GCode.Rows.Add(row);
+                    }
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -146,7 +257,7 @@ namespace BVTC.RhinoTools
         /// </summary>
         /// <param name="path">string - the filepath where the gcode will be output.</param>
         /// <returns>bool - On success true, otherwise false.</returns>
-        public bool ToolpathCurves(string path)
+        public bool DriveCrvsToToolpath(string path)
         {
             try
             {
@@ -178,7 +289,7 @@ namespace BVTC.RhinoTools
                         {
                             var curve = (Rhino.Geometry.Curve)obj.Geometry;
                             curve.Transform(this.Xform);
-                            var polyline = curve.ToPolyline(this.Tolerance, this.Tolerance, this.Tolerance, 100).ToPolyline();
+                            var polyline = curve.ToPolyline(this.Tolerance, this.Tolerance, this.Tolerance, 1000).ToPolyline();
                             curve.Domain = new Rhino.Geometry.Interval(0, 1);
                             curves.Add(curve);
                             polylines.Add(polyline);
@@ -192,48 +303,68 @@ namespace BVTC.RhinoTools
                     // begin toolpathing //
                     double[] u = new double[] { 0, 0 };
                     int[] segments = new int[] { 0, 0 };
-                    while (segments[0] < polylines[0].SegmentCount && segments[1] < polylines[1].SegmentCount)
+                    while (segments[0] <= polylines[0].SegmentCount && segments[1] <= polylines[1].SegmentCount)
                     {
-                        Point3d[] pts = new Point3d[] { polylines[0][segments[0]], polylines[1][segments[1]] };
-                        double dist0 = this.CutPlane.DistanceTo(pts[0]);
-                        double dist1 = this.CutPlane.DistanceTo(pts[1]);
+                        int first = 0;
+                        int second = 1;
 
-                        if ((dist0 - dist1) < this.Tolerance)
-                        {
-                            segments[0] += 1;
-                            segments[1] += 1;
-                        }
-                        else if (dist0 < dist1)
-                        {
-                            var plane = new Plane(pts[0], this.CutPlane.Normal);
-                            var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[1], plane, this.Tolerance);
-                            if (intersects == null)
-                            {
-                                pts[1] = this.CutPlane.ClosestPoint(pts[1]);
-                            }
+                        Point3d[] pts = new Point3d[] { polylines[first][segments[first]], polylines[second][segments[second]] };
+                        double[] distances = new double[] {
+                            this.CutPlane.DistanceTo(pts[first]),
+                            this.CutPlane.DistanceTo(pts[second]),
+                        };
 
-                            segments[0] += 1;
+                        if (Math.Abs(distances[first] - distances[second]) < this.Tolerance)
+                        {
+                            segments[first] += 1;
+                            segments[second] += 1;
                         }
                         else
                         {
-                            var plane = new Plane(pts[1], this.CutPlane.Normal);
-                            var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[0], plane, this.Tolerance);
-                            if (intersects == null)
+                            // the first curve is always the "drive" curve //
+                            // flip the drive curve if the next point isn't on the first curve //
+                            if (distances[first] > distances[second])
                             {
-                                pts[0] = this.CutPlane.ClosestPoint(pts[0]);
+                                first = 1;
+                                second = 0;
+                                pts[first] = pts[second];
                             }
 
-                            segments[1] += 1;
+                            var plane = new Plane(pts[first], this.CutPlane.Normal);
+                            var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[1], plane, this.Tolerance);
+                            if (intersects == null)
+                            {
+                                pts[second] = this.CutPlane.ClosestPoint(pts[1]);
+                            }
+
+                            if (intersects[0].IsPoint)
+                            {
+                                pts[second] = intersects[0].PointA;
+                            }
+                            else
+                            {
+                                throw new Exception($"Not method exists to parse intersect type for overlapping curves.");
+                            }
+
+                            segments[first] += 1;
                         }
 
-                        // assign new U values //
-                        for (int i = 0; i < u.Length; i++)
-                        {
-                            curves[i].ClosestPoint(pts[i], out u[i]);
-                        }
-
-                        DataRow gcode = this.CalculatePostion(pts[0], pts[1]);
+                        DataRow gcode = this.CalculatePostion(pts[first], pts[second]);
                         gcode["Type"] = type;
+
+                        // make sure line of gcode do not repeat //
+                        if (this.GCode.Rows.Count > 1)
+                        {
+                            DataRow lastRow = this.GCode.Rows[this.GCode.Rows.Count - 1];
+                            if (gcode["X"] == lastRow["X"]
+                            && gcode["Y"] == lastRow["Y"]
+                            && gcode["Z"] == lastRow["Z"]
+                            && gcode["A"] == lastRow["A"])
+                            {
+                                continue;
+                            }
+                        }
+                        
                         this.GCode.Rows.Add(gcode);
                     }
                 }
@@ -256,7 +387,7 @@ namespace BVTC.RhinoTools
         /// <param name="lines">Lines for wire to follow, mid point will be the position, ends will inform the angle.</param>
         /// <param name="types">If the string is empty all values will default to Drive speed, specify "Rapid" for G00.</param>
         /// <returns>If successful returns true.</returns>
-        public bool ToolpathLines(Line[] lines, string[] types)
+        public bool LinesToToolpath(Line[] lines, string[] types)
         {
             for (int i = 0; i < lines.Length; i++)
             {
@@ -372,7 +503,35 @@ namespace BVTC.RhinoTools
             return Math.Round(this.CurrentLocation[3] + move, this.ToleranceDecimals);
         }
 
-        private Transform Xform { get; set; }
+        private void DefaultSetup()
+        {
+            this.NCHeader = "G54";
+            this.NCFooter = "M30";
+
+            this.CurrentLocation = new double[] { 0, 0, 0, 0 };
+            this.AxisPrefixes = new string[] { "X ", "Y ", "Z ", "Q1=" };
+            this.FeedPrefix = "F";
+            this.CutPrefix = "G01   ";
+            this.CuttingSpeed = 200;
+            this.RapidPrefix = "G00   ";
+            this.CutPlane = Rhino.Geometry.Plane.WorldYZ;
+            this.Tolerance = 0.01;
+            this.ToleranceDecimals = 3;
+
+            this.NewGCodeTable();
+        }
+
+        private DataTable NewGCodeTable()
+        {
+            // build toolpath datatable //
+            this.GCode = new DataTable("GCode");
+            this.GCode.Columns.Add("Type", typeof(string));
+            this.GCode.Columns.Add("X", typeof(double));
+            this.GCode.Columns.Add("Y", typeof(double));
+            this.GCode.Columns.Add("Z", typeof(double));
+            this.GCode.Columns.Add("A", typeof(double));
+            return this.GCode;
+        }
 
         private DataRow CalculatePostion(Point3d pt0, Point3d pt1)
         {
@@ -386,7 +545,6 @@ namespace BVTC.RhinoTools
             position["A"] = angle;
 
             this.CurrentLocation = new double[] { mid.X, mid.Y, mid.Z, angle };
-
             return position;
         }
 
@@ -410,55 +568,55 @@ namespace BVTC.RhinoTools
                     return false;
                 }
             }
+
             return true;
+        }
+
+        private string[] CreateGCode()
+        {
+            string previousCutType = string.Empty;
+            var lines = new List<string>();
+            lines.Add(this.NCHeader);
+
+            for (int row = 0; row < this.GCode.Rows.Count; row++)
+            {
+                string line = string.Empty;
+                string type = this.GCode.Rows[row]["Type"].ToString();
+
+                if (type == "Retract" || previousCutType == string.Empty)
+                {
+                    line += this.RapidPrefix;
+                }
+                else
+                {
+                    line += this.CutPrefix;
+                }
+
+                // only add the changing lines, for better legibility //
+                for (int i = 0; i < this.AxisPrefixes.Length; i++)
+                {
+                    if (row == 0 || ((double)this.GCode.Rows[row][i + 1] != (double)this.GCode.Rows[row - 1][i + 1]))
+                    {
+                        line += $"{this.AxisPrefixes[i]}{this.GCode.Rows[row][i + 1]} ";
+                    }
+                }
+
+                if (previousCutType != "Drive" && type != "Retract")
+                {
+                    line += $" F{this.CuttingSpeed}";
+                }
+
+                lines.Add(line);
+                previousCutType = type;
+            }
+
+            lines.Add(this.NCFooter);
+            return lines.ToArray();
         }
 
         private bool WriteGcodeFile()
         {
-            string previousCutType = string.Empty;
-
-            using (StreamWriter writetext = new StreamWriter(this.FilePath))
-            {
-                writetext.WriteLine(this.NCHeader);
-                for (int row = 0; row < this.GCode.Rows.Count; row++)
-                {
-                    string line = string.Empty;
-                    string type = this.GCode.Rows[row]["Type"].ToString();
-
-                    if (type == "Retract" || previousCutType == string.Empty)
-                    {
-                        line += this.RapidPrefix;
-                    }
-                    else
-                    {
-                        line += this.CutPrefix;
-                    }
-
-                    // only add the changing lines, for better legibility //
-                    for (int i = 0; i < this.AxisPrefixes.Length; i++)
-                    {
-                        if (row == 0 || ((double)this.GCode.Rows[row][i + 1] != (double)this.GCode.Rows[row - 1][i + 1]))
-                        {
-                            line += $"{this.AxisPrefixes[i]}{this.GCode.Rows[row][i + 1]} ";
-                        }
-                        else
-                        {
-                            Console.WriteLine();
-                        }
-                    }
-
-                    if (previousCutType != "Drive" && type != "Retract")
-                    {
-                        line += $" F{this.CuttingSpeed}";
-                    }
-
-                    writetext.WriteLine(line);
-                    previousCutType = type;
-                }
-
-                writetext.WriteLine(this.NCFooter);
-            }
-
+            File.WriteAllLines(this.FilePath, this.CreateGCode());
             return true;
         }
     }
