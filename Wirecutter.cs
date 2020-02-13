@@ -356,15 +356,15 @@ namespace BVTC.RhinoTools
                         if (this.GCode.Rows.Count > 1)
                         {
                             DataRow lastRow = this.GCode.Rows[this.GCode.Rows.Count - 1];
-                            if (gcode["X"] == lastRow["X"]
-                            && gcode["Y"] == lastRow["Y"]
-                            && gcode["Z"] == lastRow["Z"]
-                            && gcode["A"] == lastRow["A"])
+                            if (Math.Abs((double)gcode["X"] - (double)lastRow["X"]) < this.Tolerance
+                                && Math.Abs((double)gcode["Y"] - (double)lastRow["Y"]) < this.Tolerance
+                                && Math.Abs((double)gcode["Z"] - (double)lastRow["Z"]) < this.Tolerance
+                                && Math.Abs((double)gcode["A"] - (double)lastRow["A"]) < this.Tolerance)
                             {
                                 continue;
                             }
                         }
-                        
+
                         this.GCode.Rows.Add(gcode);
                     }
                 }
