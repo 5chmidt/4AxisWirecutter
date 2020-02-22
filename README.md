@@ -6,11 +6,11 @@ To install the plugin download the .rhi file and drag and drop onto the Rhino 6 
 <h2>Known Issues</h2>
 If issues are found in testing please submit them via a github issue and/or upload a test file in the bug submission folder.
 
-CHANGE LOG:
-
-2/8/20 - <h4>~RESOLVED~</h4> When creating multi-line toolpaths.
+<h2>Change Log</h2>
+2/8/20 - RESOLVED - When creating multi-line toolpaths.
 Where the start of the first curve is not the end of the second curve, the g-code is missing the last line of the first curve.
 This is causing the machine to begin jogging to the next toolpath prior to finishing the first cut in its entirity.
+</p>
 
 8/15/19 - Changed cutting plane input to specify an origin, normal and rotational axis.  After specifying the rotation of the cut plane, parts will always be translated to the origin correctly before generating toolpaths.
 
