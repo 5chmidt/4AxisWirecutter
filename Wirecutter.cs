@@ -8,6 +8,9 @@ namespace BVTC.RhinoTools
     using Rhino;
     using Rhino.Geometry;
     using System.Linq;
+    using System.Text.RegularExpressions;
+    using System.Xml.Linq;
+    using BVTC.osTools.Helpers;
 
     /// <summary>
     /// Class used to generate .nc code for 4-axis wirecutting.
@@ -22,6 +25,7 @@ namespace BVTC.RhinoTools
         public Wirecutter(RhinoDoc doc, DataTable dt, Rhino.Geometry.Plane plane, double offset)
         {
             this.DefaultSetup();
+            this.CutPlane = plane;
             this.Doc = doc;
             this.Parameters = dt;
             this.Xform = Rhino.Geometry.Transform.PlaneToPlane(plane, this.CutPlane);
@@ -30,8 +34,9 @@ namespace BVTC.RhinoTools
         /// <summary>
         /// Initializes a new instance of the <see cref="Wirecutter"/> class.
         /// </summary>
-        public Wirecutter()
+        public Wirecutter(RhinoDoc doc)
         {
+            this.Doc = doc;
             this.DefaultSetup();
         }
 
@@ -41,9 +46,24 @@ namespace BVTC.RhinoTools
         public int CuttingSpeed { get; set; }
 
         /// <summary>
+        /// Gets or sets the prefix for cutting speed, typically G01.
+        /// </summary>
+        public string CutPrefix { get; set; }
+
+        /// <summary>
+        /// Gets or sets the currently set cut plane.
+        /// </summary>
+        public Plane CutPlane { get; set; }
+
+        /// <summary>
         /// Gets or sets a message if there is an error generating a toolpath, to be viewed by the end user.
         /// </summary>
         public string ErrorMessage { get; set; }
+
+        /// <summary>
+        /// Gets or sets the feed rate prefix, typically F.
+        /// </summary>
+        public string FeedPrefix { get; set; }
 
         /// <summary>
         /// Gets or sets the location of the NC file that is in progress.
@@ -69,6 +89,11 @@ namespace BVTC.RhinoTools
         public string NCHeader { get; set; }
 
         /// <summary>
+        /// Gets or sets the prefix for rapid movement, typically G00.
+        /// </summary>
+        public string RapidPrefix { get; set; }
+
+        /// <summary>
         /// Gets or sets the minumum accurate measurement default: 0.001".
         /// </summary>
         public double Tolerance { get; set; }
@@ -82,21 +107,263 @@ namespace BVTC.RhinoTools
 
         private double[] CurrentLocation { get; set; }
 
-        private Plane CutPlane { get; set; }
-
         private RhinoDoc Doc { get; set; }
-
-        private string RapidPrefix { get; set; }
-
-        private string CutPrefix { get; set; }
 
         private DataTable GCode { get; set; }
 
-        private string FeedPrefix { get; set; }
-
         private DataTable Parameters { get; set; }
 
+        private Point3d PointFromXElement(XElement element, string ElementName = "")
+        {
+            Point3d pt = new Point3d();
+
+            // find the element by name //
+            if (!string.IsNullOrEmpty(ElementName))
+            {
+                element = element.Element(ElementName);
+                if (element == null)
+                {
+                    throw new Exception($"Could not find an element named {ElementName}");
+                }
+            }
+
+            // first format check for comma seperated values //
+            if (!element.Value.Contains(','))
+            {
+                throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
+            }
+
+            // make sure there are three comma seperated values //
+            string[] splits = element.Value.Split(',');
+            if (splits.Length != 3)
+            {
+                throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
+            }
+
+            for (int i = 0; i < splits.Length; i++)
+            {
+                double d;
+                if (!double.TryParse(splits[i], out d))
+                {
+                    throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
+                }
+
+                pt[i] = d;
+            }
+
+            return pt;
+        }
+
         private Transform Xform { get; set; }
+
+        /// <summary>
+        /// Exports the current toolpathing settings into an xml file.
+        /// </summary>
+        /// <param name="filePath">string - the target location for the settings file.</param>
+        /// <returns>bool - true if the file was successfully created.</returns>
+        public bool ImportSettings(string filePath)
+        {
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException($"Could not file file at: {filePath}");
+            }
+
+            XElement settingsFile = XElement.Load(filePath);
+
+            var settings = settingsFile.Element("Settings");
+            if (settings == null)
+            {
+                throw new Exception($"{filePath} does not contain a 'Settings' element.");
+            }
+
+            foreach (var element in settings.Elements())
+            {
+                var prop = this.GetType().GetProperty(element.Name.LocalName);
+                if (prop == null)
+                {
+                    continue;
+                }
+
+                // set integer properties //
+                if (prop.PropertyType == typeof(int))
+                {
+                    int i;
+                    if (int.TryParse(element.Value, out i))
+                    {
+                        prop.SetValue(this, i);
+                    }
+                }
+
+                // set double properties //
+                if (prop.PropertyType == typeof(double))
+                {
+                    double d;
+                    if (double.TryParse(element.Value, out d))
+                    {
+                        prop.SetValue(this, d);
+                    }
+                }
+
+                // set string properties //
+                if (prop.PropertyType == typeof(string))
+                {
+                    prop.SetValue(this, element.Value);
+                }
+            }
+
+            // import plane //
+            var planeXml = settingsFile.Element("Plane");
+            if (planeXml == null)
+            {
+                return false;
+            }
+
+            // origin point //
+            this.CutPlane = new Plane(
+                this.PointFromXElement(planeXml, "Origin"),
+                (Vector3d)this.PointFromXElement(planeXml, "xDirection"),
+                (Vector3d)this.PointFromXElement(planeXml, "yDirection"));
+
+            return true;
+        }
+
+        /// <summary>
+        /// Pulls data out of the xml file into the datatable for UI display.
+        /// </summary>
+        /// <param name="filePath">string - the location of the XML file.</param>
+        /// <param name="dt">DataTable - This should be an empty table with the columns you want to fill in.</param>
+        /// <returns>DataTable - The input DataTable with applicable columns copied over.</returns>
+        public DataTable ImportCurveTable(string filePath, DataTable dt)
+        {
+            XElement settingsFile = XElement.Load(filePath);
+
+            var id = settingsFile.Element("DocId");
+            if (id == null)
+            {
+                return dt;
+            }
+
+            Guid guid;
+            if (!Guid.TryParse(id.Value, out guid))
+            {
+                return dt;
+            }
+
+            if (guid != Document.GetGuid(this.Doc, false))
+            {
+                throw new Exception($"The settings file was created for a different Rhino file.");
+            }
+
+            // build curve table //
+            var curveTable = settingsFile.FindElement("CurveTable");
+            foreach (var node in curveTable.Elements())
+            {
+                var row = dt.NewRow();
+                for (int col = 0; col < row.Table.Columns.Count; col++)
+                {
+                    string columnName = row.Table.Columns[col].ColumnName;
+                    if (columnName.Contains("HiddenColumn"))
+                    {
+                        string camelCase = Regex.Replace(columnName, "([a-z](?=[A-Z])|[A-Z](?=[A-Z][a-z]))", "$1 ");
+                        row[col] = camelCase.Split(' ').FirstOrDefault();
+                    }
+
+                    var item = node.Element(columnName);
+                    if (item == null)
+                    {
+                        continue;
+                    }
+
+                    Type type = row.Table.Columns[col].DataType;
+                    object obj;
+                    if (type == typeof(Guid))
+                    {
+                        Guid g = new Guid();
+                        if (!Guid.TryParse(item.Value, out g))
+                        {
+                            continue;
+                        }
+
+                        obj = g;
+                    }
+                    else
+                    {
+                        obj = Convert.ChangeType(item.Value, type);
+                    }
+
+                    row[col] = obj;
+                }
+
+                dt.Rows.Add(row);
+            }
+
+            return dt;
+        }
+
+        /// <summary>
+        /// Imports toolpathing settings from an xml file.
+        /// </summary>
+        /// <param name="filePath">string - the location of the newly created setting file.</param>
+        /// <returns>true - if a new file was created.</returns>
+        public bool ExportSettings(string filePath, DataTable CurveTable)
+        {
+            // create an xml file with a specific id embedded in the document //
+            XDocument document = new XDocument();
+            var root = new XElement("Root");
+            Guid docId = RhinoTools.Document.GetGuid(this.Doc, true);
+            var id = new XElement("DocId", docId);
+            root.Add(id);
+
+            // save properties //
+            var settings = new XElement("Settings");
+            foreach (var property in this.GetType().GetProperties())
+            {
+                if (property.PropertyType == typeof(int)
+                    || property.PropertyType == typeof(double)
+                    || property.PropertyType == typeof(string))
+                {
+                    settings.Add(new XElement(property.Name, property.GetValue(this)));
+                }
+            }
+
+            root.Add(settings);
+
+            // save cut plane to settings file //
+            var plane = new XElement("Plane");
+            plane.Add(new XElement("Origin", this.CutPlane.Origin));
+            plane.Add(new XElement("xDirection", this.CutPlane.XAxis));
+            plane.Add(new XElement("yDirection", this.CutPlane.YAxis));
+            root.Add(plane);
+
+            // save curve selections //
+            if (CurveTable.Rows.Count > 0)
+            {
+                var curveTable = new XElement("CurveTable");
+                for (int row = 0; row < CurveTable.Rows.Count; row++)
+                {
+                    var curveSet = new XElement("CurveSet");
+                    for (int col = 0; col < CurveTable.Columns.Count; col++)
+                    {
+                        if (CurveTable.Columns[col].ColumnName.Contains("HiddenColumn"))
+                        {
+                            continue;
+                        }
+
+                        curveSet.Add(new XElement(
+                            CurveTable.Columns[col].ColumnName,
+                            CurveTable.Rows[row][col]));
+                    }
+
+                    curveTable.Add(curveSet);
+                }
+
+                root.Add(curveTable);
+            }
+
+            document.Add(root);
+            document.Save(filePath);
+            return true;
+        }
 
         /// <summary>
         /// Generate a list of curves that show the toolpath movement.
@@ -266,6 +533,21 @@ namespace BVTC.RhinoTools
                 foreach (DataRow row in this.Parameters.Rows)
                 {
                     string type = (string)row["Type"];
+                    if (type == "Single")
+                    {
+                        Guid id = (Guid)row["Curve0"];
+                        var obj = this.Doc.Objects.Find(id);
+                        if (obj.IsValid && obj.Geometry != null && obj.Geometry.ObjectType == Rhino.DocObjects.ObjectType.Curve)
+                        {
+                            var curve = (Rhino.Geometry.Curve)obj.Geometry;
+                            curve.Transform(this.Xform);
+                            DataRow gcode = this.CalculatePostion(curve.PointAtStart, curve.PointAtEnd);
+                            this.GCode.Rows.Add(gcode);
+                        }
+
+                        continue;
+                    }
+
                     Guid[] ids = new Guid[]
                     {
                         (Guid)row["Curve0"],
@@ -288,8 +570,22 @@ namespace BVTC.RhinoTools
                         if (obj.IsValid && obj.Geometry != null && obj.Geometry.ObjectType == Rhino.DocObjects.ObjectType.Curve)
                         {
                             var curve = (Rhino.Geometry.Curve)obj.Geometry;
+                            if (!curve.IsValid)
+                            {
+                                throw new Exception($"Curve id: {guid} is not a valid curve.");
+                            }
+
                             curve.Transform(this.Xform);
-                            var polyline = curve.ToPolyline(this.Tolerance, this.Tolerance, this.Tolerance, 1000).ToPolyline();
+                            var crv = curve.ToPolyline(this.Tolerance, this.Tolerance, this.Tolerance, 100);
+
+                            if (crv == null)
+                            {
+                                throw new Exception($"Something is fucked up with curve id: {guid}" +
+                                    $"{Environment.NewLine}Try exploding and re-joining the curve." +
+                                    $"{Environment.NewLine}No on knows why this fixes the issue, but it seems to.");
+                            }
+
+                            var polyline = crv.ToPolyline();
                             curve.Domain = new Rhino.Geometry.Interval(0, 1);
                             curves.Add(curve);
                             polylines.Add(polyline);
@@ -453,35 +749,48 @@ namespace BVTC.RhinoTools
                 ##                       ##
                 ###########################
             */
-
             Vector3d horizontal = this.CutPlane.XAxis;
             Vector3d vertical = this.CutPlane.YAxis;
+
+            if (this.CutPlane.Normal.IsParallelTo(vector) != 0)
+            {
+                throw new Exception($"Wire angle vector cannot be parallel to the cut plane normal!");
+            }
 
             if (!this.CutPlane.Normal.IsPerpendicularTo(vector))
             {
                 vector = (Vector3d)this.CutPlane.ClosestPoint(new Point3d(vector.X, vector.Y, vector.Z));
             }
 
+            vector.Unitize();
             var hAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, horizontal));
             var vAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, vertical));
 
             double angle;
-            if (Math.Abs(hAngle + vAngle - 90) <= this.Tolerance * 360)
+            if (vector.IsParallelTo(this.CutPlane.XAxis) != 0)
+            {
+                angle = 0;
+            }
+            else if (vector.IsParallelTo(this.CutPlane.YAxis) != 0)
+            {
+                angle = 90;
+            }
+            else if (Math.Abs(hAngle + vAngle - 90) <= this.Doc.ModelAbsoluteTolerance)
             {
                 // Quadrent I //
                 angle = hAngle;
             }
-            else if (Math.Abs(hAngle - vAngle - 90) <= this.Tolerance *360)
+            else if (Math.Abs(hAngle - vAngle - 90) <= this.Doc.ModelAbsoluteTolerance)
             {
                 // Quadrend II //
                 angle = 90 + vAngle;
             }
-            else if (Math.Abs(hAngle + vAngle - 270) <= this.Tolerance * 360)
+            else if (Math.Abs(hAngle + vAngle - 270) <= this.Doc.ModelAbsoluteTolerance)
             {
                 // Quadrend III //
                 angle = 90 + vAngle;
             }
-            else if (Math.Abs(vAngle - hAngle - 90) <= this.Tolerance * 360)
+            else if (Math.Abs(vAngle - hAngle - 90) <= this.Doc.ModelAbsoluteTolerance)
             {
                 // Quadrend IV //
                 angle = 360 - hAngle;
@@ -541,7 +850,9 @@ namespace BVTC.RhinoTools
             position["X"] = Math.Round(mid.X, this.ToleranceDecimals);
             position["Y"] = Math.Round(mid.Y, this.ToleranceDecimals);
             position["Z"] = Math.Round(mid.Z, this.ToleranceDecimals);
-            double angle = this.VectorRotation(pt1 - pt0);
+            Vector3d vector = pt1 - pt0;
+            vector.Unitize();
+            double angle = this.VectorRotation(vector);
             position["A"] = angle;
 
             this.CurrentLocation = new double[] { mid.X, mid.Y, mid.Z, angle };
