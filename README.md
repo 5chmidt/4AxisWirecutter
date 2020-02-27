@@ -4,9 +4,14 @@ C# tools for Rhino 6 to enable programming of a 4-axis ruled surface cutter.
 To install the plugin download the .rhi file and drag and drop onto the Rhino 6 canvas, or run to install.
 
 <h2>Known Issues</h2>
-If issues are found in testing please submit them via a github issue and/or upload a test file in the bug submission folder.
+
+Toolpaths are not correctly translating to the origin.  
+For the time being, the best way to ensure toolpaths generate correctly is to draw objects in Rhino on the origin.
 
 <h2>Change Log</h2>
+
+2/26/20 - Resolved issue with toolpathing core, that would skip half of the drive curves is specific situations.
+
 2/8/20 - RESOLVED - When creating multi-line toolpaths.
 Where the start of the first curve is not the end of the second curve, the g-code is missing the last line of the first curve.
 This is causing the machine to begin jogging to the next toolpath prior to finishing the first cut in its entirity.
