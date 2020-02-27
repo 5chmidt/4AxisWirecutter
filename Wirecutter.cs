@@ -601,51 +601,50 @@ namespace BVTC.RhinoTools
                     int[] segments = new int[] { 0, 0 };
                     while (segments[0] <= polylines[0].SegmentCount && segments[1] <= polylines[1].SegmentCount)
                     {
-                        int first = 0;
-                        int second = 1;
+                        int close = 0;
+                        int far = 1;
 
-                        Point3d[] pts = new Point3d[] { polylines[first][segments[first]], polylines[second][segments[second]] };
-                        double[] distances = new double[] {
-                            this.CutPlane.DistanceTo(pts[first]),
-                            this.CutPlane.DistanceTo(pts[second]),
+                        Point3d[] pts = new Point3d[] { polylines[close][segments[close]], polylines[far][segments[far]] };
+                        double[] distances = new double[] 
+                        {
+                            this.CutPlane.DistanceTo(pts[close]),
+                            this.CutPlane.DistanceTo(pts[far]),
                         };
 
-                        if (Math.Abs(distances[first] - distances[second]) < this.Tolerance)
+                        if (Math.Abs(distances[close] - distances[far]) < this.Tolerance)
                         {
-                            segments[first] += 1;
-                            segments[second] += 1;
+                            segments[close] += 1;
+                            segments[far] += 1;
                         }
                         else
                         {
                             // the first curve is always the "drive" curve //
                             // flip the drive curve if the next point isn't on the first curve //
-                            if (distances[first] > distances[second])
+                            if (distances[close] > distances[far])
                             {
-                                first = 1;
-                                second = 0;
-                                pts[first] = pts[second];
+                                close = 1;
+                                far = 0;
                             }
 
-                            var plane = new Plane(pts[first], this.CutPlane.Normal);
-                            var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[1], plane, this.Tolerance);
+                            var plane = new Plane(pts[close], this.CutPlane.Normal);
+                            var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[far], plane, this.Tolerance);
                             if (intersects == null)
                             {
-                                pts[second] = this.CutPlane.ClosestPoint(pts[1]);
+                                pts[far] = plane.ClosestPoint(pts[1]);
                             }
-
-                            if (intersects[0].IsPoint)
+                            else if (intersects[0].IsPoint)
                             {
-                                pts[second] = intersects[0].PointA;
+                                pts[far] = intersects[0].PointA;
                             }
                             else
                             {
                                 throw new Exception($"Not method exists to parse intersect type for overlapping curves.");
                             }
 
-                            segments[first] += 1;
+                            segments[close] += 1;
                         }
 
-                        DataRow gcode = this.CalculatePostion(pts[first], pts[second]);
+                        DataRow gcode = this.CalculatePostion(pts[close], pts[far]);
                         gcode["Type"] = type;
 
                         // make sure line of gcode do not repeat //
