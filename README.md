@@ -9,9 +9,12 @@ Toolpaths are not correctly translating to the origin.
 For the time being, the best way to ensure toolpaths generate correctly is to draw objects in Rhino on the origin.
 
 <h2>Change Log</h2>
-
 2/26/20 - Resolved issue with toolpathing core, that would skip half of the drive curves is specific situations.
-
+</p>
+2/22/20 - Added method to import/export an xml file containing all the settings and drive curves from a toolpath setup.
+</p>
+2/22/20 - Added a properties tab which allows for feed/speed settings to be changed/viewed before being added to the gcode file.
+</p>
 2/8/20 - RESOLVED - When creating multi-line toolpaths.
 Where the start of the first curve is not the end of the second curve, the g-code is missing the last line of the first curve.
 This is causing the machine to begin jogging to the next toolpath prior to finishing the first cut in its entirity.
