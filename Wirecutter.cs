@@ -17,23 +17,30 @@ namespace BVTC.RhinoTools
     /// </summary>
     public class Wirecutter
     {
+        private readonly Plane cutPlane = new Plane(
+            new Point3d(0, 0, 0),
+            new Vector3d(0, 1, 0),
+            new Vector3d(0, 0, 1));
+
         /// <summary>
         /// Initializes a new instance of the <see cref="Wirecutter"/> class.
         /// </summary>
+        /// <param name="doc"> RhinoDoc - the file that will be used by the wirecutter class.</param>
         /// <param name="dt">DataTable - must contain correct column structure for toolpathing inputs.</param>
+        /// <param name="plane"> Rhino.Geometry.Plane - the cutting plane where the geometry has been drawn, will be translated.</param>
         /// <param name="offset">double - the retract offset specified by the programmer.</param>
         public Wirecutter(RhinoDoc doc, DataTable dt, Rhino.Geometry.Plane plane, double offset)
         {
             this.DefaultSetup();
-            this.CutPlane = plane;
+            this.GeometryPlane = plane;
             this.Doc = doc;
             this.Parameters = dt;
-            this.Xform = Rhino.Geometry.Transform.PlaneToPlane(plane, this.CutPlane);
         }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Wirecutter"/> class.
         /// </summary>
+        /// <param name="doc"> RhinoDoc - the file that will be used by the wirecutter class.</param>
         public Wirecutter(RhinoDoc doc)
         {
             this.Doc = doc;
@@ -51,11 +58,6 @@ namespace BVTC.RhinoTools
         public string CutPrefix { get; set; }
 
         /// <summary>
-        /// Gets or sets the currently set cut plane.
-        /// </summary>
-        public Plane CutPlane { get; set; }
-
-        /// <summary>
         /// Gets or sets a message if there is an error generating a toolpath, to be viewed by the end user.
         /// </summary>
         public string ErrorMessage { get; set; }
@@ -69,6 +71,22 @@ namespace BVTC.RhinoTools
         /// Gets or sets the location of the NC file that is in progress.
         /// </summary>
         public string FilePath { get; set; }
+
+        /// <summary>
+        /// Gets the length of the currently loaded g-code file.
+        /// </summary>
+        public int CountGcodeLines
+        {
+            get
+            {
+                return this.GCode.Rows.Count;
+            }
+        }
+        
+        /// <summary>
+        /// Gets or sets the currently set cut plane.
+        /// </summary>
+        public Plane GeometryPlane { get; set; }
 
         /// <summary>
         /// Gets the currently loaded NC code as a DataTable.
@@ -99,9 +117,23 @@ namespace BVTC.RhinoTools
         public double Tolerance { get; set; }
 
         /// <summary>
-        /// Gets or sets the number of decimal places to calculate tolerance.
+        /// Gets the number of decimal places to calculate tolerance.
         /// </summary>
-        public int ToleranceDecimals { get; set; }
+        public int ToleranceDecimals
+        {
+            get
+            {
+                var log = Math.Log10(this.Tolerance);
+                if (log >= 0)
+                {
+                    return 0;
+                }
+                else
+                {
+                    return Convert.ToInt32(Math.Abs(Math.Floor(log)));
+                }
+            }
+        }
 
         private string[] AxisPrefixes { get; set; }
 
@@ -113,48 +145,75 @@ namespace BVTC.RhinoTools
 
         private DataTable Parameters { get; set; }
 
-        private Point3d PointFromXElement(XElement element, string ElementName = "")
+        private Transform Xform
         {
-            Point3d pt = new Point3d();
-
-            // find the element by name //
-            if (!string.IsNullOrEmpty(ElementName))
+            get
             {
-                element = element.Element(ElementName);
-                if (element == null)
+                var xform = Transform.PlaneToPlane(this.GeometryPlane, this.cutPlane);
+                if (xform == null)
                 {
-                    throw new Exception($"Could not find an element named {ElementName}");
-                }
-            }
-
-            // first format check for comma seperated values //
-            if (!element.Value.Contains(','))
-            {
-                throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
-            }
-
-            // make sure there are three comma seperated values //
-            string[] splits = element.Value.Split(',');
-            if (splits.Length != 3)
-            {
-                throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
-            }
-
-            for (int i = 0; i < splits.Length; i++)
-            {
-                double d;
-                if (!double.TryParse(splits[i], out d))
-                {
-                    throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
+                    xform = Transform.Identity;
                 }
 
-                pt[i] = d;
+                return xform;
             }
-
-            return pt;
         }
 
-        private Transform Xform { get; set; }
+        private Transform XformInverse
+        {
+            get
+            {
+                var xform = Transform.PlaneToPlane(this.cutPlane, this.GeometryPlane);
+                if (xform == null)
+                {
+                    return Transform.Identity;
+                }
+                else
+                {
+                    return xform;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Compute distance the tool has traveled.
+        /// </summary>
+        /// <returns>double - total distance traveled.</returns>
+        public double ComputeToolTravel()
+        {
+            double totalDistance = 0;
+            for (int i = 1; i < this.CountGcodeLines; i++)
+            {
+                double sum = 0;
+                foreach (string axis in this.AxisPrefixes)
+                {
+                    double first = (double)this.GCode.Rows[i - 1][axis];
+                    double second = (double)this.GCode.Rows[i][axis];
+                    sum += Math.Pow(second - first, 2);
+                }
+
+                totalDistance += Math.Sqrt(sum);
+            }
+
+            return totalDistance;
+        }
+
+        /// <summary>
+        /// Round a vector to a number of decimals, this prevents floating point decimals.
+        /// </summary>
+        /// <param name="vector">vector - 3D vector to be rounded.</param>
+        /// <param name="decimals">int - the number of decimals to round to.</param>
+        /// <returns>vector - the vector without floating point decimals.</returns>
+        public static Vector3d RoundVector(Vector3d vector, int decimals)
+        {
+            var rounded = new Vector3d(0, 0, 0);
+            for (int i = 0; i < 3; i++)
+            {
+                rounded[i] = Math.Round(vector[i], decimals);
+            }
+
+            return rounded;
+        }
 
         /// <summary>
         /// Exports the current toolpathing settings into an xml file.
@@ -179,7 +238,7 @@ namespace BVTC.RhinoTools
             foreach (var element in settings.Elements())
             {
                 var prop = this.GetType().GetProperty(element.Name.LocalName);
-                if (prop == null)
+                if (prop == null || prop.SetMethod == null)
                 {
                     continue;
                 }
@@ -219,11 +278,10 @@ namespace BVTC.RhinoTools
             }
 
             // origin point //
-            this.CutPlane = new Plane(
+            this.GeometryPlane = new Plane(
                 this.PointFromXElement(planeXml, "Origin"),
                 (Vector3d)this.PointFromXElement(planeXml, "xDirection"),
                 (Vector3d)this.PointFromXElement(planeXml, "yDirection"));
-
             return true;
         }
 
@@ -330,9 +388,15 @@ namespace BVTC.RhinoTools
 
             // save cut plane to settings file //
             var plane = new XElement("Plane");
-            plane.Add(new XElement("Origin", this.CutPlane.Origin));
-            plane.Add(new XElement("xDirection", this.CutPlane.XAxis));
-            plane.Add(new XElement("yDirection", this.CutPlane.YAxis));
+            plane.Add(new XElement(
+                "Origin",
+                RoundVector((Vector3d)this.GeometryPlane.Origin, this.ToleranceDecimals)));
+            plane.Add(new XElement(
+                "xDirection",
+                RoundVector(this.GeometryPlane.XAxis, this.ToleranceDecimals)));
+            plane.Add(new XElement(
+                "yDirection",
+                RoundVector(this.GeometryPlane.YAxis, this.ToleranceDecimals)));
             root.Add(plane);
 
             // save curve selections //
@@ -369,7 +433,8 @@ namespace BVTC.RhinoTools
         /// Generate a list of curves that show the toolpath movement.
         /// </summary>
         /// <param name="onOrigin">If true generate the toolpaths at world Origin.</param>
-        /// <returns></returns>
+        /// <param name="lineLength">The length of the cut line to be shown.</param>
+        /// <returns>Line[] - array of lines showing the gcode positions.</returns>
         public Line[] ToolpathToCurves(bool onOrigin, double lineLength = 6)
         {
             List<Line> lines = new List<Line>();
@@ -378,79 +443,20 @@ namespace BVTC.RhinoTools
                 double x = (double)row["X"];
                 double y = (double)row["Y"];
                 double z = (double)row["Z"];
-                double angle = (double)row["A"];
+                double angle = (double)row["Q1="];
 
-                Transform xform = Transform.Rotation(RhinoMath.ToRadians(angle), this.CutPlane.Normal, new Point3d(x, y, z));
-                Point3d pt0 = new Point3d(x, y, z) + (this.CutPlane.XAxis * lineLength);
-                Point3d pt1 = new Point3d(x, y, z) - (this.CutPlane.XAxis * lineLength);
+                Transform xform = Transform.Rotation(RhinoMath.ToRadians(angle), this.cutPlane.Normal, new Point3d(x, y, z));
+                Point3d pt0 = new Point3d(x, y, z) + (this.cutPlane.XAxis * lineLength);
+                Point3d pt1 = new Point3d(x, y, z) - (this.cutPlane.XAxis * lineLength);
                 pt0.Transform(xform);
                 pt1.Transform(xform);
 
                 Line line = new Line(pt0, pt1);
-                if (!onOrigin && this.Xform.TryGetInverse(out xform))
-                {
-                    line.Transform(xform);
-                }
-
+                line.Transform(this.XformInverse);
                 lines.Add(line);
             }
 
             return lines.ToArray();
-        }
-
-        /// <summary>
-        /// Generate a preview mesh of the toolpath cuts.
-        /// </summary>
-        /// <param name="onOrigin"></param>
-        /// <returns>Mesh - Rhino geometry.</returns>
-        public Mesh[] ToolpathToMesh(bool onOrigin)
-        {
-            Line[] lines = this.ToolpathToCurves(onOrigin);
-            List<Mesh> meshes = new List<Mesh>();
-
-            for (int i = 0; i < lines.Length - 1; i++)
-            {
-                Mesh mesh = new Mesh();
-                Line first = lines[i];
-                Line second = lines[i + 1];
-
-                // check if the curves are intersection //
-                double a;
-                double b;
-                if (Rhino.Geometry.Intersect.Intersection.LineLine(first, second, out a, out b, this.Tolerance, true))
-                {
-                    // create two triangular meshes //
-                    Point3d intersect = first.PointAt(a);
-                    
-                    // add verticies //
-                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtStart);
-                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtStart);
-                    mesh.Vertices.Add(intersect);
-                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtEnd);
-                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtEnd);
-
-                    // add faces //
-                    mesh.Faces.AddFace(0, 1, 2);
-                    mesh.Faces.AddFace(3, 1, 4);
-                    mesh.Normals.ComputeNormals();
-                    mesh.Compact();
-                    meshes.Add(mesh);
-                }
-                else
-                {
-                    // add single quad mesh //
-                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtStart);
-                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtStart);
-                    mesh.Vertices.Add(second.ToNurbsCurve().PointAtEnd);
-                    mesh.Vertices.Add(first.ToNurbsCurve().PointAtEnd);
-                    mesh.Faces.AddFace(0, 1, 2, 3);
-                    mesh.Normals.ComputeNormals();
-                    mesh.Compact();
-                    meshes.Add(mesh);
-                }
-            }
-
-            return meshes.ToArray();
         }
 
         /// <summary>
@@ -575,9 +581,11 @@ namespace BVTC.RhinoTools
                                 throw new Exception($"Curve id: {guid} is not a valid curve.");
                             }
 
-                            curve.Transform(this.Xform);
-                            var crv = curve.ToPolyline(this.Tolerance, this.Tolerance, this.Tolerance, 100);
-
+                            var crv = curve.ToPolyline(
+                                this.Tolerance,
+                                this.Doc.ModelAngleToleranceRadians,
+                                this.Tolerance,
+                                100);
                             if (crv == null)
                             {
                                 throw new Exception($"Something is fucked up with curve id: {guid}" +
@@ -586,6 +594,7 @@ namespace BVTC.RhinoTools
                             }
 
                             var polyline = crv.ToPolyline();
+                            polyline.ReduceSegments(this.Tolerance);
                             curve.Domain = new Rhino.Geometry.Interval(0, 1);
                             curves.Add(curve);
                             polylines.Add(polyline);
@@ -607,8 +616,8 @@ namespace BVTC.RhinoTools
                         Point3d[] pts = new Point3d[] { polylines[close][segments[close]], polylines[far][segments[far]] };
                         double[] distances = new double[] 
                         {
-                            this.CutPlane.DistanceTo(pts[close]),
-                            this.CutPlane.DistanceTo(pts[far]),
+                            this.GeometryPlane.DistanceTo(pts[close]),
+                            this.GeometryPlane.DistanceTo(pts[far]),
                         };
 
                         if (Math.Abs(distances[close] - distances[far]) < this.Tolerance)
@@ -626,7 +635,7 @@ namespace BVTC.RhinoTools
                                 far = 0;
                             }
 
-                            var plane = new Plane(pts[close], this.CutPlane.Normal);
+                            var plane = new Plane(pts[close], this.GeometryPlane.Normal);
                             var intersects = Rhino.Geometry.Intersect.Intersection.CurvePlane(curves[far], plane, this.Tolerance);
                             if (intersects == null)
                             {
@@ -654,7 +663,7 @@ namespace BVTC.RhinoTools
                             if (Math.Abs((double)gcode["X"] - (double)lastRow["X"]) < this.Tolerance
                                 && Math.Abs((double)gcode["Y"] - (double)lastRow["Y"]) < this.Tolerance
                                 && Math.Abs((double)gcode["Z"] - (double)lastRow["Z"]) < this.Tolerance
-                                && Math.Abs((double)gcode["A"] - (double)lastRow["A"]) < this.Tolerance)
+                                && Math.Abs((double)gcode["Q1="] - (double)lastRow["Q1="]) < this.Tolerance)
                             {
                                 continue;
                             }
@@ -706,6 +715,47 @@ namespace BVTC.RhinoTools
         }
 
         /// <summary>
+        /// Create a render mesh from a set of toolpath lines.
+        /// </summary>
+        /// <param name="lines">line - array of lines to be made into a mesh.</param>
+        /// <returns>mesh - the completed mesh.</returns>
+        public Mesh LinesToMesh(Line[] lines, RhinoDoc doc)
+        {
+            Mesh mesh = new Mesh();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                if (i == 1)
+                {
+                    mesh.Vertices.Add(lines[i - 1].ToNurbsCurve().PointAtStart);
+                    mesh.Vertices.Add(lines[i - 1].ToNurbsCurve().PointAtEnd);
+                }
+
+                // add verticies //
+                mesh.Vertices.Add(lines[i].ToNurbsCurve().PointAtStart);
+                mesh.Vertices.Add(lines[i].ToNurbsCurve().PointAtEnd);
+
+                mesh.Faces.AddFace(
+                    mesh.Vertices.Count - 4,
+                    mesh.Vertices.Count - 3,
+                    mesh.Vertices.Count - 1,
+                    mesh.Vertices.Count - 2);
+            }
+
+            mesh.Normals.ComputeNormals();
+            mesh.Compact();
+            return mesh;
+        }
+
+        /// <summary>
+        /// Sets the parameter table that will be used to generate toolpaths.
+        /// </summary>
+        /// <param name="dt">DataTable - Must contain specific columns.</param>
+        public void SetCurveTable(DataTable dt)
+        {
+            this.Parameters = dt;
+        }
+
+        /// <summary>
         /// Calcuate the wire rotataion from -360 to +360 based on the input vector and current location.
         /// </summary>
         /// <param name="vector">Vector3d - The direction the wire should be oriented toward.</param>
@@ -748,17 +798,17 @@ namespace BVTC.RhinoTools
                 ##                       ##
                 ###########################
             */
-            Vector3d horizontal = this.CutPlane.XAxis;
-            Vector3d vertical = this.CutPlane.YAxis;
+            Vector3d horizontal = this.cutPlane.XAxis;
+            Vector3d vertical = this.cutPlane.YAxis;
 
-            if (this.CutPlane.Normal.IsParallelTo(vector) != 0)
+            if (this.cutPlane.Normal.IsParallelTo(vector) != 0)
             {
                 throw new Exception($"Wire angle vector cannot be parallel to the cut plane normal!");
             }
 
-            if (!this.CutPlane.Normal.IsPerpendicularTo(vector))
+            if (!this.cutPlane.Normal.IsPerpendicularTo(vector))
             {
-                vector = (Vector3d)this.CutPlane.ClosestPoint(new Point3d(vector.X, vector.Y, vector.Z));
+                vector = (Vector3d)this.cutPlane.ClosestPoint(new Point3d(vector.X, vector.Y, vector.Z));
             }
 
             vector.Unitize();
@@ -766,11 +816,11 @@ namespace BVTC.RhinoTools
             var vAngle = RhinoMath.ToDegrees(Vector3d.VectorAngle(vector, vertical));
 
             double angle;
-            if (vector.IsParallelTo(this.CutPlane.XAxis) != 0)
+            if (vector.IsParallelTo(this.cutPlane.XAxis) != 0)
             {
                 angle = 0;
             }
-            else if (vector.IsParallelTo(this.CutPlane.YAxis) != 0)
+            else if (vector.IsParallelTo(this.cutPlane.YAxis) != 0)
             {
                 angle = 90;
             }
@@ -817,15 +867,13 @@ namespace BVTC.RhinoTools
             this.NCFooter = "M30";
 
             this.CurrentLocation = new double[] { 0, 0, 0, 0 };
-            this.AxisPrefixes = new string[] { "X ", "Y ", "Z ", "Q1=" };
+            this.AxisPrefixes = new string[] { "X", "Y", "Z", "Q1=" };
             this.FeedPrefix = "F";
-            this.CutPrefix = "G01   ";
+            this.CutPrefix = "G01";
             this.CuttingSpeed = 200;
-            this.RapidPrefix = "G00   ";
-            this.CutPlane = Rhino.Geometry.Plane.WorldYZ;
+            this.RapidPrefix = "G00";
+            this.GeometryPlane = Rhino.Geometry.Plane.WorldYZ;
             this.Tolerance = 0.01;
-            this.ToleranceDecimals = 3;
-
             this.NewGCodeTable();
         }
 
@@ -834,25 +882,28 @@ namespace BVTC.RhinoTools
             // build toolpath datatable //
             this.GCode = new DataTable("GCode");
             this.GCode.Columns.Add("Type", typeof(string));
-            this.GCode.Columns.Add("X", typeof(double));
-            this.GCode.Columns.Add("Y", typeof(double));
-            this.GCode.Columns.Add("Z", typeof(double));
-            this.GCode.Columns.Add("A", typeof(double));
+            foreach (string axis in this.AxisPrefixes)
+            {
+                this.GCode.Columns.Add(axis, typeof(double));
+            }
+
             return this.GCode;
         }
 
         private DataRow CalculatePostion(Point3d pt0, Point3d pt1)
         {
             DataRow position = this.GCode.NewRow();
-            Point3d mid = (pt0 + pt1) / 2;
+            pt0.Transform(this.Xform);
+            pt1.Transform(this.Xform);
 
+            Point3d mid = (pt0 + pt1) / 2;
             position["X"] = Math.Round(mid.X, this.ToleranceDecimals);
             position["Y"] = Math.Round(mid.Y, this.ToleranceDecimals);
             position["Z"] = Math.Round(mid.Z, this.ToleranceDecimals);
             Vector3d vector = pt1 - pt0;
             vector.Unitize();
             double angle = this.VectorRotation(vector);
-            position["A"] = angle;
+            position["Q1="] = angle;
 
             this.CurrentLocation = new double[] { mid.X, mid.Y, mid.Z, angle };
             return position;
@@ -902,6 +953,8 @@ namespace BVTC.RhinoTools
                     line += this.CutPrefix;
                 }
 
+                line += "   ";
+
                 // only add the changing lines, for better legibility //
                 for (int i = 0; i < this.AxisPrefixes.Length; i++)
                 {
@@ -922,6 +975,47 @@ namespace BVTC.RhinoTools
 
             lines.Add(this.NCFooter);
             return lines.ToArray();
+        }
+
+        private Point3d PointFromXElement(XElement element, string elementName = "")
+        {
+            Point3d pt = new Point3d();
+
+            // find the element by name //
+            if (!string.IsNullOrEmpty(elementName))
+            {
+                element = element.Element(elementName);
+                if (element == null)
+                {
+                    throw new Exception($"Could not find an element named {elementName}");
+                }
+            }
+
+            // first format check for comma seperated values //
+            if (!element.Value.Contains(','))
+            {
+                throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
+            }
+
+            // make sure there are three comma seperated values //
+            string[] splits = element.Value.Split(',');
+            if (splits.Length != 3)
+            {
+                throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
+            }
+
+            for (int i = 0; i < splits.Length; i++)
+            {
+                double d;
+                if (!double.TryParse(splits[i], out d))
+                {
+                    throw new Exception($"{element.Value} is not the proper format to make a 3D point.");
+                }
+
+                pt[i] = d;
+            }
+
+            return pt;
         }
 
         private bool WriteGcodeFile()
